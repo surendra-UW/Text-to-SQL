@@ -33,11 +33,39 @@ def build_database(db):
   return Database(db['db_id'], tables, columns, db['foreign_keys'])
 
 def build_databases_list():
+    database_index_name_map = {}
     with open(tables_file_path) as tables_file:
         db_list = json.load(tables_file)
         databases = []
         # with open("catalogue.txt", "w") as file:
-        for db in db_list:
+        for index, db in enumerate(db_list):
             database = build_database(db)
             databases.append(database)
-    return databases
+            database_index_name_map[database.name] = index
+    return databases, database_index_name_map
+
+def build_table_schema(database, table, include_reference_tables):
+    column_types = table.column_types
+    query = f"CREATE TABLE {table.name} (\n"
+    for index, column in enumerate(table.columns):
+        primary_key = " PRIMARY KEY" if column == table.primary_key else ""
+        query = query + f"{column} {column_types[index]}{primary_key},\n"
+    all_columns = database.columns
+    reference_tables = []
+    for fk in database.foreign_keys:
+        if all_columns[fk[0]][0] == table.id:
+            query += f"FOREIGN KEY({all_columns[fk[0]][1]}) REFERENCES "
+            reference_table_ind = all_columns[fk[1]][0]
+            reference_tables.append(reference_table_ind)
+            reference_table = database.tables[reference_table_ind]
+            query += f"{reference_table.name}({all_columns[fk[1]][1]})\n"
+
+    #end of the table
+    query += ");\n"
+
+    #add the reference tables to the query string 
+    if include_reference_tables and reference_tables:
+        for table_ind in reference_tables:
+            query += "\n\n"
+            query += build_table_schema(database,  database.tables[table_ind], False)
+    return query
