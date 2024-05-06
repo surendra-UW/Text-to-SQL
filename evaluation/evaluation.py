@@ -1,26 +1,6 @@
 import sqlite3
-import multiprocessing as mp
-from func_timeout import func_timeout, FunctionTimedOut
-import sys
 import concurrent.futures
-
-def execute_model(predicted_sql,ground_truth, db_place, idx, meta_time_out):
-    try:
-        res = func_timeout(meta_time_out, execute_sql,
-                                  args=(predicted_sql, ground_truth, db_place))
-    except KeyboardInterrupt:
-        sys.exit(0)
-    except FunctionTimedOut:
-        result = [(f'timeout',)]
-        res = 0
-    except Exception as e:
-        result = [(f'error',)]  # possibly len(query) > 512 or not executable
-        res = 0
-    # print(result)
-    # result = str(set([ret[0] for ret in result]))
-    result = {'sql_idx': idx, 'res': res}
-    # print(result)
-    return result
+import argparse
 
 def read_sql_file(file_path):
     """
@@ -41,6 +21,30 @@ def read_sql_file(file_path):
                 sql_info = (line[:semicolon_index],'')
             content.append(sql_info)
         return content
+
+# def compute_acc_by_diff(exec_results,diff_json_path):
+#     num_queries = len(exec_results)
+#     results = [res['res'] for res in exec_results]
+#     contents = load_json(diff_json_path)
+#     simple_results, moderate_results, challenging_results = [], [], []
+
+#     for i,content in enumerate(contents):
+#         if content['difficulty'] == 'simple':
+#             simple_results.append(exec_results[i])
+
+#         if content['difficulty'] == 'moderate':
+#             moderate_results.append(exec_results[i])
+
+#         if content['difficulty'] == 'challenging':
+#             challenging_results.append(exec_results[i])
+
+#     simple_acc = sum([res['res'] for res in simple_results])/len(simple_results)
+#     moderate_acc = sum([res['res'] for res in moderate_results])/len(moderate_results)
+#     challenging_acc = sum([res['res'] for res in challenging_results])/len(challenging_results)
+#     all_acc = sum(results)/num_queries
+#     count_lists = [len(simple_results), len(moderate_results), len(challenging_results), num_queries]
+#     return simple_acc * 100, moderate_acc * 100, challenging_acc * 100, all_acc * 100, count_lists
+
 
 def exact_match(query_pairs):
     """
@@ -74,44 +78,47 @@ def parallel_execute_and_compare(query_pairs):
     Computes the execution accuracy by comparing the results of the generated SQL query to the reference SQL query.
     """
     #TODO parallel
-    # with concurrent.futures.ThreadPoolExecutor() as executor:
-    #     #execute all sqls asynchronously
-    #     future_to_actual_sql = {executor.submit(execute_sql, actual_sql[0], actual_sql[1]): i for i, (actual_sql, _) in enumerate(query_pairs)}
-    #     future_to_generated_sql = {executor.submit(execute_sql, generated_sql[0], generated_sql[1]): i for i, (_, generated_sql) in enumerate(query_pairs)}
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        #execute all sqls asynchronously
+        future_to_actual_sql = {executor.submit(execute_sql, actual_sql[0], actual_sql[1]): i for i, (actual_sql, _) in enumerate(query_pairs)}
+        future_to_generated_sql = {executor.submit(execute_sql, generated_sql[0], generated_sql[1]): i for i, (_, generated_sql) in enumerate(query_pairs)}
         
-    #     #restore all results
-    #     actual_results = []
-    #     generated_results = []
+        #restore all results
+        actual_results = [None] * len(query_pairs)
+        generated_results = [None] * len(query_pairs)
 
-    #     for future in concurrent.futures.as_completed(future_to_actual_sql):
-    #         actual_results.append(future_to_actual_sql[future])
-    #     for future in concurrent.futures.as_completed(future_to_generated_sql):
-    #         generated_results.append(future)
+        for future in concurrent.futures.as_completed(future_to_actual_sql):
+            index = future_to_actual_sql[future]
+            actual_results[index] =future._result
+        for future in concurrent.futures.as_completed(future_to_generated_sql):
+            index = future_to_generated_sql[future]
+            generated_results[index] =future._result
     match_count = 0
-    for query in query_pairs:
-        actual = query[0]
-        generated = query[1]
-        actual_result = execute_sql(actual[0] , actual[1])
-        generated_result = execute_sql(generated[0], generated[1])
-        if actual_result == generated_result:
+    for result in zip(actual_results,generated_results):
+        if result[0] == result[1]:
             match_count += 1
-            
+
     # Calculate the exact match accuracy
     accuracy = (match_count / len(query_pairs)) * 100
     return accuracy
 
 
 if __name__ == "__main__":
-    exec_result = []
+    args_parser = argparse.ArgumentParser()
+    args_parser.add_argument('--actual_sql_path', type=str, required=True, default='')
+    args_parser.add_argument('--generated_sql_path', type=str, required=True, default='')
+    args = args_parser.parse_args()
     # # Example usage
     # sql_query = "SELECT name, age FROM users WHERE id = 1;"
     # table_name = extract_single_table_name(sql_query)
     # print("Extracted table name:", table_name)
 
     # File paths
-    actual_sql_file = 'evaluation/actual_query_duplicate.txt'
+    #actual_sql_file = 'evaluation/actual_query_duplicate.txt'
+    actual_sql_file = args.actual_sql_path
     # TODO: predict file
-    generated_sql_file = 'evaluation/actual_query.txt'
+    #generated_sql_file = 'evaluation/actual_query.txt'
+    generated_sql_file = args.generated_sql_path
 
     # Read SQL statements from files
     actual_sqls = read_sql_file(actual_sql_file)
