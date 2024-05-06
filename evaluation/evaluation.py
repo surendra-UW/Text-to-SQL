@@ -1,13 +1,8 @@
 import sqlite3
-import sqlparse
-from sqlparse.sql import IdentifierList, Identifier
-from sqlparse.tokens import Keyword
 import multiprocessing as mp
 from func_timeout import func_timeout, FunctionTimedOut
 import sys
-
-def result_callback(result):
-    exec_result.append(result)
+import concurrent.futures
 
 def execute_model(predicted_sql,ground_truth, db_place, idx, meta_time_out):
     try:
@@ -27,30 +22,6 @@ def execute_model(predicted_sql,ground_truth, db_place, idx, meta_time_out):
     # print(result)
     return result
 
-def extract_single_table_name(sql):
-    """
-    Extracts the table name from a SQL query using sqlparse
-    """
-    # Parse the SQL
-    parsed = sqlparse.parse(sql)[0]
-
-    # Initialize a flag to detect when 'FROM' has been found
-    from_seen = False
-
-    # Iterate over the tokens in the parsed SQL
-    for token in parsed.tokens:
-        # If 'FROM' has been found, the next identifier should be the table name
-        if from_seen:
-            if isinstance(token, Identifier) or isinstance(token, IdentifierList):
-                # Return the first Identifier name, ignoring potential commas or other characters
-                return token.get_real_name() if isinstance(token, Identifier) else token.get_identifiers().__next__().get_real_name()
-        
-        # Set the flag when 'FROM' keyword is encountered
-        if token.ttype is Keyword and token.value.upper() == 'FROM':
-            from_seen = True
-
-    return None
-
 def read_sql_file(file_path):
     """
     Reads a SQL file and returns a list of SQL statements. Handles both line-separated formats.
@@ -63,68 +34,72 @@ def read_sql_file(file_path):
             # every line should have a semicolon
             semicolon_index = line.find(';')
             # get content before semicolon
-            if semicolon_index != -1:  
-                content_before_semicolon = line[:semicolon_index]
+            if semicolon_index != -1:
+                #sql_info = (sql query, database_name)
+                sql_info = (line[:semicolon_index],line[semicolon_index+1:].strip())
             else:
-                content_before_semicolon = line
-            content.append(content_before_semicolon)
+                sql_info = (line[:semicolon_index],'')
+            content.append(sql_info)
         return content
 
-def exact_match(generated_sqls, reference_sqls):
+def exact_match(query_pairs):
     """
     Compare generated SQL queries to reference queries for exact match accuracy.
     """
-    if len(generated_sqls) != len(reference_sqls):
-        raise ValueError("The number of generated SQL queries and reference SQL queries must be the same.")
-    
+
     # Count the number of exact matches
     match_count = 0
-    for generated, reference in zip(generated_sqls, reference_sqls):
+    for actual, rgenerated in query_pairs:
         # Normalize the SQL queries by stripping and converting to lower case for a case-insensitive comparison
-        if generated.replace(' ', '').lower() == reference.replace(' ', '').lower():
+        if actual[0].replace(' ', '').lower() == rgenerated[0].replace(' ', '').lower():
             match_count += 1
             
     # Calculate the exact match accuracy
     accuracy = (match_count / len(generated_sqls)) * 100
     return accuracy
 
-def execute_sql(database_path, sql):
+def execute_sql(sql, database):
     """
     Executes a SQL query on a SQLite database and returns the results.
     """
+    database_path = 'evaluation/database/' + database + '/' + database +'.sqlite'
     with sqlite3.connect(database_path) as conn:
         cursor = conn.cursor()
         cursor.execute(sql)
         results = cursor.fetchall()  # Fetch all results of the query.
     return results
 
-def execution_accuracy(generated_sqls, reference_sqls):
+def parallel_execute_and_compare(query_pairs):
     """
     Computes the execution accuracy by comparing the results of the generated SQL query to the reference SQL query.
     """
+    #TODO parallel
+    # with concurrent.futures.ThreadPoolExecutor() as executor:
+    #     #execute all sqls asynchronously
+    #     future_to_actual_sql = {executor.submit(execute_sql, actual_sql[0], actual_sql[1]): i for i, (actual_sql, _) in enumerate(query_pairs)}
+    #     future_to_generated_sql = {executor.submit(execute_sql, generated_sql[0], generated_sql[1]): i for i, (_, generated_sql) in enumerate(query_pairs)}
+        
+    #     #restore all results
+    #     actual_results = []
+    #     generated_results = []
+
+    #     for future in concurrent.futures.as_completed(future_to_actual_sql):
+    #         actual_results.append(future_to_actual_sql[future])
+    #     for future in concurrent.futures.as_completed(future_to_generated_sql):
+    #         generated_results.append(future)
     match_count = 0
-    for generated, reference in zip(generated_sqls, reference_sqls):
-        ref_table = extract_single_table_name(reference) + '.sqlite'
-        reference_results = execute_sql(ref_table, reference)
-        gen_table = extract_single_table_name(generated) + '.sqlite'
-        generated_results = execute_sql(gen_table, generated)
-
-    # Check if the results match
-    if generated_results == reference_results:
-        match_count += 1
-
+    for query in query_pairs:
+        actual = query[0]
+        generated = query[1]
+        actual_result = execute_sql(actual[0] , actual[1])
+        generated_result = execute_sql(generated[0], generated[1])
+        if actual_result == generated_result:
+            match_count += 1
+            
     # Calculate the exact match accuracy
-    accuracy = (match_count / len(generated_sqls)) * 100
+    accuracy = (match_count / len(query_pairs)) * 100
     return accuracy
 
-def run_sqls_parallel(sqls, db_places, num_cpus=1, meta_time_out=30.0):
-    pool = mp.Pool(processes=num_cpus)
-    for i,sql_pair in enumerate(sqls):
-
-        predicted_sql, ground_truth = sql_pair
-        pool.apply_async(execution_accuracy, args=(predicted_sql, ground_truth, db_places[i], i, meta_time_out), callback=result_callback)
-    pool.close()
-    pool.join()
 
 if __name__ == "__main__":
     exec_result = []
@@ -134,17 +109,19 @@ if __name__ == "__main__":
     # print("Extracted table name:", table_name)
 
     # File paths
-    generated_sql_file = 'actual_query.txt'
-    reference_sql_file = 'actual_query_duplicate.txt'
+    actual_sql_file = 'evaluation/actual_query_duplicate.txt'
+    # TODO: predict file
+    generated_sql_file = 'evaluation/actual_query.txt'
 
     # Read SQL statements from files
+    actual_sqls = read_sql_file(actual_sql_file)
     generated_sqls = read_sql_file(generated_sql_file)
-    reference_sqls = read_sql_file(reference_sql_file)
 
+    query_pairs = list(zip(actual_sqls, generated_sqls))
     # Calculate accuracy
-    EM_accuracy = exact_match(generated_sqls, reference_sqls)
-    print(f"Exact Match Accuracy: {EM_accuracy}%")
+    EM_rate = exact_match(query_pairs)
+    print(f"Exact Match Rate: {EM_rate}%")
 
     # Calculate execution accuracy
-    EX_accuracy = execution_accuracy(generated_sqls, reference_sqls)
+    EX_accuracy = parallel_execute_and_compare(query_pairs)
     print(f"Execution Accuracy: {EX_accuracy}%")
