@@ -16,9 +16,9 @@ def read_sql_file(file_path):
             # get content before semicolon
             if semicolon_index != -1:
                 #sql_info = (sql query, database_name)
-                sql_info = (line[:semicolon_index],line[semicolon_index+1:].strip())
+                sql_info = (line[:semicolon_index].strip(),line[semicolon_index+1:].strip())
             else:
-                sql_info = (line[:semicolon_index],'')
+                sql_info = (line[:semicolon_index].strip(),'')
             content.append(sql_info)
         return content
 
@@ -104,25 +104,34 @@ def parallel_execute_and_compare(query_pairs):
 
 
 if __name__ == "__main__":
-    args_parser = argparse.ArgumentParser()
-    args_parser.add_argument('--actual_sql_path', type=str, required=True, default='')
-    args_parser.add_argument('--generated_sql_path', type=str, required=True, default='')
-    args = args_parser.parse_args()
+    # args_parser = argparse.ArgumentParser()
+    # args_parser.add_argument('--actual_sql_path', type=str, required=True, default='')
+    # args_parser.add_argument('--generated_sql_path', type=str, required=True, default='')
+    # args = args_parser.parse_args()
     # # Example usage
     # sql_query = "SELECT name, age FROM users WHERE id = 1;"
     # table_name = extract_single_table_name(sql_query)
     # print("Extracted table name:", table_name)
 
     # File paths
-    #actual_sql_file = 'evaluation/actual_query_duplicate.txt'
-    actual_sql_file = args.actual_sql_path
+    actual_sql_file = 'evaluation/actual_query_1.txt'
+    #actual_sql_file = args.actual_sql_path
+
     # TODO: predict file
-    #generated_sql_file = 'evaluation/actual_query.txt'
-    generated_sql_file = args.generated_sql_path
+    generated_sql_file = 'evaluation/generated_query_1.txt'
+    #generated_sql_file = args.generated_sql_path
 
     # Read SQL statements from files
     actual_sqls = read_sql_file(actual_sql_file)
     generated_sqls = read_sql_file(generated_sql_file)
+
+    #use actual query's database name
+    for idx, val in enumerate(generated_sqls):
+        generated_sqls[idx] = (val[0],actual_sqls[idx][1])
+        temp = actual_sqls[idx]
+    
+    for val in generated_sqls:
+        val = val
 
     query_pairs = list(zip(actual_sqls, generated_sqls))
     # Calculate accuracy
