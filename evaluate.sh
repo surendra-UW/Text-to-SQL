@@ -1,0 +1,1 @@
+python3 evaluation/evaluation.py --actual_sql_path actual_query.txt --generated_sql_path actual_query.txt
