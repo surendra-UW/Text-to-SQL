@@ -114,11 +114,11 @@ if __name__ == "__main__":
     # print("Extracted table name:", table_name)
 
     # File paths
-    actual_sql_file = 'evaluation/actual_query_1.txt'
+    actual_sql_file = 'evaluation/actual_query3.txt'
     #actual_sql_file = args.actual_sql_path
 
     # TODO: predict file
-    generated_sql_file = 'evaluation/generated_query_1.txt'
+    generated_sql_file = 'evaluation/generated_query3.txt'
     #generated_sql_file = args.generated_sql_path
 
     # Read SQL statements from files
